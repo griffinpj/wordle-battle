@@ -1,0 +1,16 @@
+services:
+  wordle-battle:
+    image: cougargriff/wordle-battle:latest
+    build: .
+    container_name: wordle-battle
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      DATA_DIR: "/data"
+    volumes:
+      - wordle-battle-data:/data
+
+volumes:
+  wordle-battle-data:
