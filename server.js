@@ -270,14 +270,19 @@ async function handleGuess(game, player, word) {
   if (game.mode === "sudden") {
     // Sudden death: first correct ends it immediately.
     if (correct) { sendState(game); return endGame(game, player.id); }
-    sendState(game);
     checkAutoExtend(game);
+    sendState(game);
     return;
   }
 
   // Turn mode: even on a correct guess, let the rest of the active
   // players finish their turn(s). Game only ends when no one is eligible
   // (all done — won, resigned, or exhausted maxRows).
+  //
+  // Auto-extend MUST run before we look for the next turn, otherwise the
+  // last player to exhaust rows ends the game even though we'd have
+  // added more rows for the still-trying players.
+  checkAutoExtend(game);
   const next = nextTurnIndex(game);
   if (next < 0) {
     sendState(game);
@@ -285,9 +290,6 @@ async function handleGuess(game, player, word) {
   }
   game.turnIndex = next;
   sendState(game);
-  checkAutoExtend(game);
-  // After extending, the previously-exhausted players become eligible
-  // again; turnIndex still points at someone valid, so nothing else to do.
 }
 
 function handleResign(game, player) {
@@ -353,14 +355,13 @@ wss.on("connection", (ws) => {
       const name = String(msg.name || "Player").slice(0, 24);
       let player = game.players.find(p => p.id === playerId);
       if (player) {
-        // Reconnect — bind ws + refresh name.
+        // Reconnect with the same playerId — bind new socket, refresh name.
+        // This is what lets a refresh during an active game re-attach.
         player.ws = ws;
         player.name = name;
       } else {
-        if (game.status === "ended") return send(ws, { type: "error", message: "Game already ended" });
+        if (game.status !== "lobby") return send(ws, { type: "error", message: "Game already in progress" });
         if (game.players.length >= 8) return send(ws, { type: "error", message: "Game full" });
-        // Late join during an active game is allowed; they enter the turn
-        // rotation with an empty board.
         player = { id: playerId, name, ws, board: [], won: false, resigned: false };
         game.players.push(player);
       }
