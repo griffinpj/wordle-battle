@@ -4,7 +4,7 @@ const express = require("express");
 const { WebSocketServer } = require("ws");
 const Database = require("better-sqlite3");
 const { customAlphabet } = require("nanoid");
-const { randomAnswer, isValidGuess, score } = require("./words");
+const { randomAnswer, validateGuess, isFormatOk, score } = require("./words");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
@@ -106,7 +106,7 @@ function makeGame({ hostId, hostName, mode }) {
   return game;
 }
 
-function publicState(game) {
+function publicStateFor(game, viewerId) {
   return {
     id: game.id,
     code: game.code,
@@ -117,14 +117,21 @@ function publicState(game) {
     maxRows: game.maxRows,
     winnerId: game.winnerId,
     target: game.status === "ended" ? game.target : null,
-    players: game.players.map(p => ({
-      id: p.id,
-      name: p.name,
-      board: p.board,
-      won: p.won,
-      resigned: p.resigned,
-      connected: !!(p.ws && p.ws.readyState === 1),
-    })),
+    players: game.players.map(p => {
+      const reveal = p.id === viewerId || game.status === "ended";
+      const board = reveal
+        ? p.board
+        : p.board.map(g => ({ result: g.result, ts: g.ts }));
+      return {
+        id: p.id,
+        name: p.name,
+        board,
+        guessCount: p.board.length,
+        won: p.won,
+        resigned: p.resigned,
+        connected: !!(p.ws && p.ws.readyState === 1),
+      };
+    }),
   };
 }
 
@@ -135,9 +142,14 @@ function broadcast(game, msg) {
   }
 }
 
-function sendState(game) {
-  broadcast(game, { type: "state", state: publicState(game) });
+function broadcastState(game, type = "state", extra = {}) {
+  for (const p of game.players) {
+    if (!p.ws || p.ws.readyState !== 1) continue;
+    p.ws.send(JSON.stringify({ type, ...extra, state: publicStateFor(game, p.id) }));
+  }
 }
+
+function sendState(game) { broadcastState(game, "state"); }
 
 function send(ws, msg) {
   if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -156,7 +168,7 @@ function endGame(game, winnerId) {
   game.status = "ended";
   game.winnerId = winnerId;
   updateGameEnd.run(winnerId, Date.now(), game.id);
-  broadcast(game, { type: "game_end", winnerId, target: game.target, state: publicState(game) });
+  broadcastState(game, "game_end", { winnerId, target: game.target });
 }
 
 function checkAutoExtend(game) {
@@ -169,15 +181,27 @@ function checkAutoExtend(game) {
   }
 }
 
-function handleGuess(game, player, word) {
+async function handleGuess(game, player, word) {
   if (game.status !== "active") return send(player.ws, { type: "error", message: "Game not active" });
   if (player.won || player.resigned) return;
   word = String(word || "").toLowerCase().trim();
-  if (!isValidGuess(word)) return send(player.ws, { type: "error", message: "Not in word list" });
+  if (!isFormatOk(word)) return send(player.ws, { type: "error", message: "Must be 5 letters" });
   if (game.mode === "turn") {
     const active = activePlayers(game);
     const current = active[game.turnIndex % active.length];
     if (!current || current.id !== player.id) return send(player.ws, { type: "error", message: "Not your turn" });
+  }
+  if (player.validating) return; // prevent double-submit while async lookup is pending
+  player.validating = true;
+  let valid = false;
+  try { valid = await validateGuess(word); } finally { player.validating = false; }
+  if (!valid) return send(player.ws, { type: "error", message: "Not a recognized word" });
+  // Re-check active state — game could have ended while awaiting the API.
+  if (game.status !== "active" || player.won || player.resigned) return;
+  if (game.mode === "turn") {
+    const active = activePlayers(game);
+    const current = active[game.turnIndex % active.length];
+    if (!current || current.id !== player.id) return send(player.ws, { type: "error", message: "Turn changed" });
   }
 
   const result = score(word, game.target);
@@ -230,7 +254,7 @@ function startGame(game) {
   game.status = "active";
   game.turnIndex = 0;
   insertGame.run(game.id, game.code, game.mode, game.target, null, Date.now(), null);
-  broadcast(game, { type: "start", state: publicState(game) });
+  broadcastState(game, "start");
 }
 
 wss.on("connection", (ws) => {
@@ -251,7 +275,7 @@ wss.on("connection", (ws) => {
       game.players.push(player);
       ws.playerId = playerId;
       ws.gameCode = game.code;
-      send(ws, { type: "joined", playerId, gameCode: game.code, state: publicState(game) });
+      send(ws, { type: "joined", playerId, gameCode: game.code, state: publicStateFor(game, playerId) });
       return;
     }
 
@@ -273,7 +297,7 @@ wss.on("connection", (ws) => {
       }
       ws.playerId = playerId;
       ws.gameCode = code;
-      send(ws, { type: "joined", playerId, gameCode: code, state: publicState(game) });
+      send(ws, { type: "joined", playerId, gameCode: code, state: publicStateFor(game, playerId) });
       sendState(game);
       return;
     }
@@ -301,7 +325,10 @@ wss.on("connection", (ws) => {
       if (!game) return;
       const p = game.players.find(x => x.id === ws.playerId);
       if (!p) return;
-      handleGuess(game, p, msg.word);
+      handleGuess(game, p, msg.word).catch(err => {
+        console.error("guess error", err);
+        send(ws, { type: "error", message: "Server error validating guess" });
+      });
       return;
     }
 

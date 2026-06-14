@@ -73,10 +73,21 @@ function syncUrl() {
   history.replaceState(null, "", url.pathname + (url.search ? url.search : "") + url.hash);
 }
 
+function maybeClearCurrent(prevState) {
+  // If our own board grew on this update, the in-flight guess landed —
+  // wipe the input buffer so the next row starts empty.
+  const pid = getPlayerId();
+  const prevLen = prevState?.players?.find(p => p.id === pid)?.board.length ?? 0;
+  const newLen = state.game?.players?.find(p => p.id === pid)?.board.length ?? 0;
+  if (newLen > prevLen) state.current = "";
+}
+
 function onMessage(msg) {
+  const prev = state.game;
   switch (msg.type) {
     case "joined":
       state.game = msg.state;
+      maybeClearCurrent(prev);
       // route by status
       if (msg.state.status === "lobby") state.view = "lobby";
       else if (msg.state.status === "active") state.view = "game";
@@ -86,6 +97,7 @@ function onMessage(msg) {
       break;
     case "state":
       state.game = msg.state;
+      maybeClearCurrent(prev);
       if (msg.state.status === "lobby") state.view = "lobby";
       else if (msg.state.status === "active" && state.view !== "end") state.view = "game";
       syncUrl();
@@ -93,6 +105,7 @@ function onMessage(msg) {
       break;
     case "start":
       state.game = msg.state;
+      state.current = "";
       state.view = "game";
       syncUrl();
       render();
@@ -113,6 +126,7 @@ function onMessage(msg) {
       break;
     case "error":
       toast(msg.message || "Error");
+      state.submitting = false;
       shakeCurrentRow();
       break;
   }
@@ -333,12 +347,23 @@ function renderLobby() {
   if (startBtn) startBtn.onclick = () => wsSend({ type: "start" });
 }
 
+// Cached references to the current-input row's tiles, so per-keystroke
+// updates can mutate the DOM directly without a full re-render.
+let curTileEls = [];
+
 function renderGame(animateLast = false) {
   const g = state.game;
   const me = currentPlayer();
   const activeOrder = g.players.filter(p => !p.resigned);
   const currentTurnId = g.mode === "turn" && activeOrder.length ? activeOrder[g.turnIndex % activeOrder.length]?.id : null;
-  const myTurn = g.mode === "sudden" ? true : currentTurnId === me?.id;
+  const myTurn = !me ? false :
+    (g.mode === "sudden"
+      ? (!me.won && !me.resigned && g.status === "active")
+      : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
+  state.myTurn = myTurn;
+  state.submitting = false;
+
+  const others = g.players.filter(p => p.id !== me?.id);
 
   app.innerHTML = `
     ${brand(`<div class="row" style="gap:6px;">
@@ -350,12 +375,19 @@ function renderGame(animateLast = false) {
         <span class="muted"> · Code ${g.code}</span>
       </div>
       <div class="gameMeta">
-        ${g.mode==='turn' ? `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>` : `<span class="badge live">Race!</span>`}
+        ${g.mode==='turn'
+          ? `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>`
+          : `<span class="badge live">Race!</span>`}
         <span class="badge">${g.maxRows} rows</span>
       </div>
     </div>
-    <div class="game" id="boards">
-      ${g.players.map(p => boardCard(p, g, me, currentTurnId)).join("")}
+    ${others.length ? `
+      <div class="oppBar">
+        ${others.map(p => oppCard(p, g, currentTurnId)).join("")}
+      </div>` : ""
+    }
+    <div class="myWrap">
+      ${myBoardCard(me, g)}
     </div>
     ${keyboardEl(me, g)}
   `;
@@ -363,37 +395,37 @@ function renderGame(animateLast = false) {
     if (!confirm("Resign this round?")) return;
     wsSend({ type: "resign" });
   };
+  curTileEls = Array.from(document.querySelectorAll('.myBoard .tile[data-cur]'));
+  paintCurrentRow(); // sync DOM to state.current
   wireKeyboard();
+  document.removeEventListener("keydown", keyHandler);
   document.addEventListener("keydown", keyHandler);
-  window.removeEventListener("beforeunload", unloadHandler);
-  window.addEventListener("beforeunload", unloadHandler);
 
   if (animateLast) animateExtendRows();
 }
 
-function unloadHandler() { /* keep ws open via page lifecycle */ }
-
-function boardCard(p, g, me, currentTurnId) {
-  const isMe = p.id === me?.id;
-  const isTurn = g.mode === "turn" && currentTurnId === p.id;
+function myBoardCard(me, g) {
+  if (!me) return "";
   const rows = [];
   for (let i = 0; i < g.maxRows; i++) {
-    const entry = p.board[i];
+    const entry = me.board[i];
     if (entry) {
-      rows.push(`<div class="boardRow" style="display:contents;">${
-        entry.word.split("").map((ch, j) => `<div class="tile ${entry.result[j]} flip" style="animation-delay:${j*80}ms">${ch}</div>`).join("")
-      }</div>`);
-    } else if (isMe && i === p.board.length && !p.won && !p.resigned && g.status === "active") {
-      // Current input row
-      const cur = state.current.padEnd(5, " ").slice(0,5);
-      rows.push(cur.split("").map((ch, j) => `<div class="tile ${ch.trim()?'filled pop':''}" data-cur="${j}">${ch.trim()?ch:""}</div>`).join(""));
+      rows.push(entry.word.split("").map((ch, j) =>
+        `<div class="tile ${entry.result[j]} flip" style="animation-delay:${j*80}ms">${ch}</div>`
+      ).join(""));
+    } else if (i === me.board.length && !me.won && !me.resigned && g.status === "active") {
+      // Reserve current-input row — tiles get filled by paintCurrentRow().
+      rows.push(Array.from({length:5}).map((_, j) =>
+        `<div class="tile" data-cur="${j}"></div>`
+      ).join(""));
     } else {
       rows.push(Array.from({length:5}).map(() => `<div class="tile"></div>`).join(""));
     }
   }
+  const status = me.won ? "WON" : me.resigned ? "resigned" : null;
   return `
-    <div class="boardCard ${isMe?'me':''} ${isTurn?'turn':''}" data-pid="${p.id}">
-      <div class="boardName">${escapeHTML(p.name)}${isMe?' (you)':''}${p.resigned?' · resigned':''}${p.won?' · WON':''}</div>
+    <div class="boardCard myBoard me" data-pid="${me.id}">
+      <div class="boardName">${escapeHTML(me.name)} (you)${status?` · ${status}`:""}</div>
       <div class="board" style="grid-template-rows:repeat(${g.maxRows}, var(--tile));">
         ${rows.join("")}
       </div>
@@ -401,9 +433,54 @@ function boardCard(p, g, me, currentTurnId) {
   `;
 }
 
+// Opponent strip — colored rows only, no letters. Preserves privacy and
+// keeps the layout tight on mobile.
+function oppCard(p, g, currentTurnId) {
+  const isTurn = g.mode === "turn" && currentTurnId === p.id;
+  const filledRows = p.board.map(entry =>
+    `<div class="oppRow">${entry.result.map(r => `<span class="oppTile ${r} flip" style="animation-delay:0ms"></span>`).join("")}</div>`
+  );
+  const empty = Math.max(0, g.maxRows - p.board.length);
+  const emptyRows = Array.from({length: empty}).map(() =>
+    `<div class="oppRow">${Array.from({length:5}).map(() => `<span class="oppTile"></span>`).join("")}</div>`
+  );
+  const status = p.won ? "won" : p.resigned ? "out" : `${p.board.length}/${g.maxRows}`;
+  return `
+    <div class="opp ${isTurn?'turn':''}" data-pid="${p.id}">
+      <div class="oppHead">
+        <div class="dot ${p.connected?'on':''}"></div>
+        <div class="oppName">${escapeHTML(p.name)}</div>
+        <div class="oppStatus">${status}</div>
+      </div>
+      <div class="oppRows">
+        ${filledRows.concat(emptyRows).join("")}
+      </div>
+    </div>
+  `;
+}
+
+function paintCurrentRow() {
+  if (!curTileEls.length) return;
+  const cur = state.current.padEnd(5, " ").slice(0,5).split("");
+  curTileEls.forEach((el, i) => {
+    const ch = cur[i].trim();
+    const had = el.textContent !== "";
+    if (ch) {
+      if (el.textContent !== ch) {
+        el.textContent = ch;
+        el.classList.add("filled");
+        el.classList.remove("pop"); void el.offsetWidth; el.classList.add("pop");
+      }
+    } else if (had) {
+      el.textContent = "";
+      el.classList.remove("filled","pop");
+    }
+  });
+}
+
 function animateExtendRows() {
-  // The newest rows already render; add a subtle row-extend marker via animation class is automatic.
-  const tiles = document.querySelectorAll(".boardCard .tile");
+  // Subtle drop animation on every tile of the boards after row extension.
+  const tiles = document.querySelectorAll(".boardCard .tile, .opp .oppTile");
   tiles.forEach(t => t.classList.add("row-extend"));
   setTimeout(() => tiles.forEach(t => t.classList.remove("row-extend")), 500);
 }
@@ -423,20 +500,16 @@ function keyboardEl(me, g) {
   const rows = [
     "qwertyuiop",
     "asdfghjkl",
-    "ZENTER zxcvbnm BACK",
   ];
+  const locked = !state.myTurn;
   return `
-    <div class="keyboard" id="kb">
-      ${rows.map((r, idx) => {
-        if (idx < 2) {
-          return `<div class="kbRow">${r.split("").map(ch => keyBtn(ch, status[ch])).join("")}</div>`;
-        }
-        return `<div class="kbRow">
-          ${keyBtn("Enter", null, "wide")}
-          ${"zxcvbnm".split("").map(ch => keyBtn(ch, status[ch])).join("")}
-          ${keyBtn("Back", null, "wide")}
-        </div>`;
-      }).join("")}
+    <div class="keyboard ${locked?'locked':''}" id="kb" aria-disabled="${locked}">
+      ${rows.map(r => `<div class="kbRow">${r.split("").map(ch => keyBtn(ch, status[ch])).join("")}</div>`).join("")}
+      <div class="kbRow">
+        ${keyBtn("Enter", null, "wide")}
+        ${"zxcvbnm".split("").map(ch => keyBtn(ch, status[ch])).join("")}
+        ${keyBtn("Back", null, "wide")}
+      </div>
     </div>
   `;
 }
@@ -446,14 +519,31 @@ function keyBtn(label, st, cls = "") {
   return `<div class="key ${cls} ${st||""}" data-key="${data}">${label === "Back" ? "⌫" : label}</div>`;
 }
 
+function inputAllowed() {
+  return state.view === "game" && state.myTurn && !state.submitting && state.game?.status === "active";
+}
+
+function pushLetter(ch) {
+  if (!inputAllowed()) return;
+  if (state.current.length >= 5) return;
+  state.current += ch;
+  paintCurrentRow();
+}
+function popLetter() {
+  if (!inputAllowed()) return;
+  if (!state.current.length) return;
+  state.current = state.current.slice(0,-1);
+  paintCurrentRow();
+}
+
 function wireKeyboard() {
   const kb = $("#kb"); if (!kb) return;
   kb.querySelectorAll(".key").forEach(k => {
     k.onclick = () => {
       const v = k.dataset.key;
       if (v === "enter") submitGuess();
-      else if (v === "back") { state.current = state.current.slice(0,-1); render(); }
-      else if (/^[a-z]$/.test(v) && state.current.length < 5) { state.current += v; render(); }
+      else if (v === "back") popLetter();
+      else if (/^[a-z]$/.test(v)) pushLetter(v);
     };
   });
 }
@@ -463,24 +553,25 @@ function keyHandler(e) {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const k = e.key;
   if (k === "Enter") { e.preventDefault(); submitGuess(); }
-  else if (k === "Backspace") { e.preventDefault(); state.current = state.current.slice(0,-1); render(); }
-  else if (/^[a-zA-Z]$/.test(k) && state.current.length < 5) { state.current += k.toLowerCase(); render(); }
+  else if (k === "Backspace") { e.preventDefault(); popLetter(); }
+  else if (/^[a-zA-Z]$/.test(k)) { pushLetter(k.toLowerCase()); }
 }
 
 function submitGuess() {
+  if (!inputAllowed()) {
+    if (state.game?.mode === "turn" && !state.myTurn) toast("Wait for your turn");
+    return;
+  }
   if (state.current.length !== 5) { toast("5 letters"); shakeCurrentRow(); return; }
   const w = state.current;
-  state.current = "";
+  state.submitting = true;
   wsSend({ type: "guess", word: w });
+  // Don't clear state.current until the server confirms or rejects, so a
+  // dictionary API rejection lets the player edit their guess.
 }
 
 function shakeCurrentRow() {
-  const me = currentPlayer();
-  if (!me) return;
-  const card = document.querySelector(`.boardCard[data-pid="${me.id}"]`);
-  if (!card) return;
-  const tiles = card.querySelectorAll(`.tile[data-cur]`);
-  tiles.forEach(t => { t.classList.remove("shake"); void t.offsetWidth; t.classList.add("shake"); });
+  curTileEls.forEach(t => { t.classList.remove("shake"); void t.offsetWidth; t.classList.add("shake"); });
 }
 
 function renderEnd() {

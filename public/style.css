@@ -155,6 +155,58 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .dot.on { background: var(--accent); box-shadow: 0 0 0 4px rgba(106,170,100,.18); }
 .tag { font-size: 11px; color: var(--muted); padding: 2px 6px; border: 1px solid var(--line); border-radius: 999px; }
 
+.myWrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.oppBar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(120px, 1fr);
+  gap: 10px;
+  overflow-x: auto;
+  padding: 8px 2px;
+  margin-bottom: 6px;
+  scrollbar-width: thin;
+}
+.opp {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.opp.turn { box-shadow: 0 0 0 2px var(--warn) inset; }
+.oppHead {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px;
+}
+.oppName {
+  flex: 1; min-width: 0;
+  font-weight: 700;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.oppStatus { color: var(--muted); font-size: 11px; }
+.oppRows {
+  display: flex; flex-direction: column; gap: 3px;
+}
+.oppRow { display: flex; gap: 3px; }
+.oppTile {
+  flex: 1;
+  height: 8px;
+  border-radius: 2px;
+  background: transparent;
+  border: 1px solid var(--line);
+}
+.oppTile.correct { background: var(--accent); border-color: var(--accent); }
+.oppTile.present { background: var(--warn); border-color: var(--warn); }
+.oppTile.absent { background: var(--bad); border-color: var(--bad); }
+
 .game {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -249,6 +301,12 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .key.present { background: var(--warn); border-color: var(--warn); color: white; }
 .key.absent { background: var(--bad); border-color: var(--bad); color: white; }
 .key:active { transform: translateY(1px); }
+
+.keyboard.locked .key {
+  opacity: .45;
+  pointer-events: none;
+  filter: grayscale(.4);
+}
 
 .toast {
   position: fixed; left: 50%; bottom: 24px;
