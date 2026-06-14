@@ -133,6 +133,7 @@ function publicStateFor(game, viewerId) {
       id: p.id,
       name: p.name,
       guesses: p.board.length,
+      rank: p.rank,
     })),
     target: game.status === "ended" ? game.target : null,
     players: game.players.map(p => {

@@ -33,8 +33,14 @@ function currentTurnPlayerId(g) {
   return n >= 0 ? g.players[n].id : null;
 }
 
+// Returns winners ordered by guess count then by earliest solve ts.
+// Each entry includes a `rank` field that uses standard competition
+// ranking: tied guess counts share the same rank, and the next rank
+// skips by the number tied (so 2 tied at the top yields ranks 1,1,3).
+// Ties are determined by guess count only — solve timestamp orders
+// within a tie but does NOT break the tie for display.
 function rankedWinners(g) {
-  return g.players
+  const sorted = g.players
     .filter(p => p.won)
     .slice()
     .sort((a, b) => {
@@ -43,9 +49,27 @@ function rankedWinners(g) {
       const bt = b.board[b.board.length - 1]?.ts || 0;
       return at - bt;
     });
+  let rank = 0;
+  let prevCount = null;
+  return sorted.map((p, i) => {
+    if (p.board.length !== prevCount) {
+      rank = i + 1;
+      prevCount = p.board.length;
+    }
+    return p.id ? Object.assign(Object.create(null), p, { rank }) : p;
+  });
+}
+
+// Co-winners at the top: every player who shares the best (rank 1) finish.
+// Used to drive the "tie" headline on the end overlay.
+function topWinners(g) {
+  return rankedWinners(g).filter(w => w.rank === 1);
 }
 
 function determineWinner(g) {
+  // Kept for legacy single-winner consumers (DB column, primary
+  // winnerId broadcast). Picks the earliest-solving member of the top
+  // tier when there's a tie.
   const r = rankedWinners(g);
   return r.length ? r[0].id : null;
 }
@@ -174,6 +198,7 @@ module.exports = {
   nextTurnIndex,
   currentTurnPlayerId,
   rankedWinners,
+  topWinners,
   determineWinner,
   checkAutoExtend,
   applyGuess,

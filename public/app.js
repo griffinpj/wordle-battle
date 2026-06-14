@@ -736,26 +736,50 @@ function shakeCurrentRow() {
 function renderEnd() {
   const g = state.game;
   const me = currentPlayer();
-  const winners = g.winners || (g.winnerId ? [{ id: g.winnerId, name: playerName(g.winnerId), guesses: g.players.find(p => p.id === g.winnerId)?.board.length || 0 }] : []);
-  const top = winners[0];
+  // Server normally provides winners[] with rank. Fall back to a single
+  // entry derived from winnerId for any old payload shape.
+  const winners = (g.winners && g.winners.length)
+    ? g.winners
+    : (g.winnerId
+        ? [{
+            id: g.winnerId,
+            name: playerName(g.winnerId),
+            guesses: g.players.find(p => p.id === g.winnerId)?.board.length || 0,
+            rank: 1,
+          }]
+        : []);
+  const top = winners.filter(w => w.rank === 1);
   const iWon = !!(me && winners.some(w => w.id === me.id));
-  const myRank = me ? winners.findIndex(w => w.id === me.id) : -1;
+  const myEntry = me ? winners.find(w => w.id === me.id) : null;
+  const myRank = myEntry?.rank ?? 0;
 
   // Background remains current view (game). Overlay on top.
   renderGame();
   const overlay = document.createElement("div");
   overlay.className = "endOverlay";
 
-  const heading = winners.length === 0
-    ? "Nobody solved it"
-    : (iWon
-        ? (myRank === 0 ? "You won! 🎉" : `You solved it — ${ordinal(myRank+1)} place`)
-        : `${escapeHTML(top.name)} wins`);
+  let heading;
+  if (winners.length === 0) {
+    heading = "Nobody solved it";
+  } else if (top.length > 1) {
+    // Tie at the top — never single out a #1.
+    const tiedNames = top.map(w => escapeHTML(w.id === me?.id ? "You" : w.name));
+    const joined = tiedNames.length === 2
+      ? `${tiedNames[0]} & ${tiedNames[1]}`
+      : `${tiedNames.slice(0, -1).join(", ")} & ${tiedNames[tiedNames.length-1]}`;
+    heading = `It's a tie — ${joined}`;
+  } else if (iWon && myRank === 1) {
+    heading = "You won! 🎉";
+  } else if (iWon) {
+    heading = `You solved it — ${ordinal(myRank)} place`;
+  } else {
+    heading = `${escapeHTML(top[0].name)} wins`;
+  }
 
   const list = winners.length
-    ? `<ol class="winList">${winners.map((w, i) => `
-        <li class="${w.id===me?.id?'self':''}">
-          <span class="rank">${i+1}</span>
+    ? `<ol class="winList">${winners.map((w) => `
+        <li class="${w.id===me?.id?'self':''} ${w.rank===1?'top':''}">
+          <span class="rank">${w.rank}</span>
           <span class="who">${escapeHTML(w.name)}${w.id===me?.id?' (you)':''}</span>
           <span class="meta">${w.guesses} guess${w.guesses===1?'':'es'}</span>
         </li>`).join("")}</ol>`

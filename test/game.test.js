@@ -8,6 +8,7 @@ const {
   currentTurnPlayerId,
   nextTurnIndex,
   rankedWinners,
+  topWinners,
   determineWinner,
   checkAutoExtend,
   isPlayerDone,
@@ -282,6 +283,117 @@ test("classic: game ends when all eligible exhaust rows with no extend possible"
 test("classic: invalid format rejected regardless of mode", () => {
   const g = gameOf(["A"], { mode: "classic" });
   assert.equal(applyGuess(g, "A", "cran", { ts: ts() }).ok, false);
+});
+
+// ---------- tie ranking ----------
+
+test("rankedWinners: 2 of 3 tied at the top -> ranks 1, 1, 3", () => {
+  const g = makeGameState({
+    mode: "classic",
+    target: "crane",
+    players: [{ id: "A" }, { id: "B" }, { id: "C" }],
+  });
+  applyGuess(g, "A", "crane", { ts: 1 });  // A wins g1
+  applyGuess(g, "B", "crane", { ts: 2 });  // B wins g1
+  applyGuess(g, "C", "slate", { ts: 3 });  // C miss
+  applyGuess(g, "C", "crane", { ts: 4 });  // C wins g2 -> ends
+
+  const r = rankedWinners(g);
+  assert.deepEqual(r.map(p => [p.id, p.rank, p.board.length]), [
+    ["A", 1, 1],
+    ["B", 1, 1],
+    ["C", 3, 2],
+  ]);
+  assert.equal(topWinners(g).length, 2);
+});
+
+test("rankedWinners: 3-way tie at the top -> ranks 1, 1, 1", () => {
+  const g = makeGameState({
+    mode: "classic", target: "crane",
+    players: [{ id: "X" }, { id: "Y" }, { id: "Z" }],
+  });
+  applyGuess(g, "X", "crane", { ts: 1 });
+  applyGuess(g, "Y", "crane", { ts: 2 });
+  applyGuess(g, "Z", "crane", { ts: 3 });
+  assert.deepEqual(rankedWinners(g).map(p => p.rank), [1, 1, 1]);
+  assert.equal(topWinners(g).length, 3);
+});
+
+test("rankedWinners: clean ranks when no ties -> 1, 2, 3", () => {
+  const g = makeGameState({
+    mode: "classic", target: "crane",
+    players: [{ id: "A" }, { id: "B" }, { id: "C" }],
+  });
+  applyGuess(g, "A", "slate", { ts: 1 });
+  applyGuess(g, "B", "crane", { ts: 2 });   // B wins g1
+  applyGuess(g, "C", "slate", { ts: 3 });
+  applyGuess(g, "A", "crane", { ts: 4 });   // A wins g2
+  applyGuess(g, "C", "trial", { ts: 5 });
+  applyGuess(g, "C", "crane", { ts: 6 });   // C wins g3 -> ends
+  assert.deepEqual(rankedWinners(g).map(p => [p.id, p.rank]), [
+    ["B", 1], ["A", 2], ["C", 3],
+  ]);
+  assert.equal(topWinners(g).length, 1);
+});
+
+test("rankedWinners: mid-list tie skips the next rank -> 1, 2, 2, 4", () => {
+  const g = makeGameState({
+    mode: "classic", target: "crane",
+    players: [{ id: "A" }, { id: "B" }, { id: "C" }, { id: "D" }],
+  });
+  // A: 1 guess, B & C: both 2 guesses, D: 3 guesses
+  applyGuess(g, "A", "crane", { ts: 1 });
+  applyGuess(g, "B", "slate", { ts: 2 });
+  applyGuess(g, "C", "slate", { ts: 3 });
+  applyGuess(g, "B", "crane", { ts: 4 });
+  applyGuess(g, "C", "crane", { ts: 5 });
+  applyGuess(g, "D", "slate", { ts: 6 });
+  applyGuess(g, "D", "trial", { ts: 7 });
+  applyGuess(g, "D", "crane", { ts: 8 }); // D wins g3 -> ends
+  assert.deepEqual(rankedWinners(g).map(p => [p.id, p.rank]), [
+    ["A", 1], ["B", 2], ["C", 2], ["D", 4],
+  ]);
+});
+
+test("rankedWinners: ts only orders within a tie, doesn't break it", () => {
+  const g = makeGameState({
+    mode: "classic", target: "crane",
+    players: [{ id: "A" }, { id: "B" }],
+  });
+  // B solves first by ts but both at 1 guess -> same rank
+  applyGuess(g, "B", "crane", { ts: 10 });
+  applyGuess(g, "A", "crane", { ts: 100 });
+  const r = rankedWinners(g);
+  assert.equal(r[0].id, "B"); // ordering: earliest ts first
+  assert.equal(r[0].rank, 1);
+  assert.equal(r[1].rank, 1); // still tied — same rank
+});
+
+test("rankedWinners: empty when no winners", () => {
+  const g = makeGameState({
+    mode: "classic", target: "crane",
+    players: [{ id: "A" }, { id: "B" }],
+  });
+  applyResign(g, "A");
+  applyResign(g, "B");
+  assert.deepEqual(rankedWinners(g), []);
+  assert.deepEqual(topWinners(g), []);
+  assert.equal(determineWinner(g), null);
+});
+
+test("rankedWinners works the same in turn mode", () => {
+  const g = makeGameState({
+    mode: "turn", target: "crane",
+    players: [{ id: "A" }, { id: "B" }, { id: "C" }],
+  });
+  applyGuess(g, "A", "crane", { ts: 1 });   // A wins g1
+  applyGuess(g, "B", "slate", { ts: 2 });
+  applyGuess(g, "C", "crane", { ts: 3 });   // C wins g1
+  applyGuess(g, "B", "trial", { ts: 4 });
+  applyGuess(g, "B", "crane", { ts: 5 });   // B wins g3 -> ends
+  const r = rankedWinners(g).map(p => [p.id, p.rank]);
+  assert.deepEqual(r, [["A", 1], ["C", 1], ["B", 3]]);
+  assert.equal(topWinners(g).length, 2);
 });
 
 test("nextTurnIndex returns -1 when nobody is eligible", () => {

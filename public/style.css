@@ -397,7 +397,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .winList li.self { border-color: rgba(106,170,100,.5); }
 .winList .rank { font-weight: 800; color: var(--muted); text-align: center; }
-.winList li:first-child .rank { color: var(--accent); }
+.winList li.top .rank { color: var(--accent); }
+.winList li.top { border-color: rgba(106,170,100,.4); }
 .winList .who { font-weight: 600; }
 .winList .meta { color: var(--muted); font-size: 13px; }
 
