@@ -241,10 +241,21 @@ function renderCreate() {
         <label>Choose a mode</label>
         <div class="modes">
           <div class="mode ${state.pendingMode==='turn'?'selected':''}" data-mode="turn">
+            <div class="mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+              </svg>
+            </div>
             <h3>Turn-by-turn</h3>
             <p>Players alternate guesses. Strategy & sabotage.</p>
           </div>
           <div class="mode ${state.pendingMode==='sudden'?'selected':''}" data-mode="sudden">
+            <div class="mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+              </svg>
+            </div>
             <h3>Sudden Death</h3>
             <p>First to guess wins. Pure speed.</p>
           </div>

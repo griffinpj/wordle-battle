@@ -126,14 +126,31 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 @media (hover: hover) {
   .mode:hover { border-color: #3a82f7; }
 }
+
+/* Per-mode accent colors — keep visually distinct even when selected. */
+.mode[data-mode="turn"]   { --mode-color: #6aaa64; }   /* green  */
+.mode[data-mode="sudden"] { --mode-color: #e07a4a; }   /* warm orange */
+
+.mode .mode-icon {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  display: inline-grid; place-items: center;
+  background: color-mix(in srgb, var(--mode-color) 18%, transparent);
+  color: var(--mode-color);
+  margin-bottom: 8px;
+}
+.mode h3 { color: var(--mode-color); }
+
 .mode.selected {
-  border-color: var(--accent);
-  background: linear-gradient(180deg, rgba(106,170,100,.16), transparent);
-  box-shadow: 0 0 0 1px var(--accent) inset;
+  border-color: var(--mode-color);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--mode-color) 18%, transparent),
+    transparent);
+  box-shadow: 0 0 0 1px var(--mode-color) inset;
 }
 .mode.selected h3::before {
   content: "✓ ";
-  color: var(--accent);
+  color: var(--mode-color);
 }
 .mode h3 { margin: 0 0 6px; font-size: 15px; }
 .mode p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
