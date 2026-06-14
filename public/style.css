@@ -123,8 +123,18 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   text-align: left;
   transition: border-color .15s, transform .15s, background .15s;
 }
-.mode:hover { border-color: #3a82f7; }
-.mode.selected { border-color: var(--accent); background: linear-gradient(180deg, rgba(106,170,100,.12), transparent); }
+@media (hover: hover) {
+  .mode:hover { border-color: #3a82f7; }
+}
+.mode.selected {
+  border-color: var(--accent);
+  background: linear-gradient(180deg, rgba(106,170,100,.16), transparent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+.mode.selected h3::before {
+  content: "✓ ";
+  color: var(--accent);
+}
 .mode h3 { margin: 0 0 6px; font-size: 15px; }
 .mode p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.4; }
 
