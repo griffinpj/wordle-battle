@@ -297,8 +297,25 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .stat .v { font-size: 22px; font-weight: 800; }
 .stat .l { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
-.linkRow { display: flex; gap: 8px; }
+.linkRow { display: flex; gap: 8px; align-items: stretch; }
 .linkRow input { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+
+.icon-action {
+  appearance: none;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0 12px;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  min-width: 44px;
+  transition: background .15s, border-color .15s, transform .05s;
+}
+.icon-action:hover { background: var(--panel); border-color: #3a4252; }
+.icon-action:active { transform: translateY(1px); }
+.icon-action svg { display: block; }
 
 .share {
   display: grid; gap: 10px;

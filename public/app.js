@@ -65,6 +65,14 @@ function reconnect() {
   wsSend({ type: "join", code: state.game.code, playerId: getPlayerId(), name: state.pendingName || getName() || "Player" });
 }
 
+function syncUrl() {
+  const g = state.game;
+  const inRoom = g && ["lobby","game","end"].includes(state.view);
+  const url = new URL(location.href);
+  if (inRoom) url.searchParams.set("c", g.code); else url.searchParams.delete("c");
+  history.replaceState(null, "", url.pathname + (url.search ? url.search : "") + url.hash);
+}
+
 function onMessage(msg) {
   switch (msg.type) {
     case "joined":
@@ -73,17 +81,20 @@ function onMessage(msg) {
       if (msg.state.status === "lobby") state.view = "lobby";
       else if (msg.state.status === "active") state.view = "game";
       else state.view = "end";
+      syncUrl();
       render();
       break;
     case "state":
       state.game = msg.state;
       if (msg.state.status === "lobby") state.view = "lobby";
       else if (msg.state.status === "active" && state.view !== "end") state.view = "game";
+      syncUrl();
       render();
       break;
     case "start":
       state.game = msg.state;
       state.view = "game";
+      syncUrl();
       render();
       break;
     case "extend":
@@ -97,6 +108,7 @@ function onMessage(msg) {
     case "game_end":
       state.game = msg.state;
       state.view = "end";
+      syncUrl();
       render();
       break;
     case "error":
@@ -252,10 +264,20 @@ function renderLobby() {
         </div>
       </div>
       <div class="share">
-        <label>Share invite link</label>
+        <label>Invite</label>
         <div class="linkRow">
           <input id="shareUrl" type="text" readonly value="${escapeAttr(shareUrl)}" />
-          <button class="secondary" id="copy">Copy</button>
+          <button class="icon-action" id="share" title="Share" aria-label="Share invite">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+              <line x1="8.6" y1="13.5" x2="15.4" y2="17.5"/><line x1="15.4" y1="6.5" x2="8.6" y2="10.5"/>
+            </svg>
+          </button>
+          <button class="icon-action" id="copy" title="Copy link" aria-label="Copy link">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>
+            </svg>
+          </button>
         </div>
       </div>
       <hr class="sep" />
@@ -283,8 +305,21 @@ function renderLobby() {
       }
     </div>
   `;
-  $("#leave").onclick = () => { wsSend({ type: "leave_lobby" }); state.game = null; state.view = "home"; render(); };
+  $("#leave").onclick = () => { wsSend({ type: "leave_lobby" }); state.game = null; state.view = "home"; syncUrl(); render(); };
   $("#copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(shareUrl); toast("Link copied"); }
+    catch { $("#shareUrl").select(); document.execCommand("copy"); toast("Link copied"); }
+  };
+  $("#share").onclick = async () => {
+    const shareData = {
+      title: "Wordle Battle",
+      text: `Join my Wordle Battle — code ${g.code}`,
+      url: shareUrl,
+    };
+    if (navigator.share) {
+      try { await navigator.share(shareData); return; }
+      catch (e) { if (e?.name === "AbortError") return; /* fall through to copy */ }
+    }
     try { await navigator.clipboard.writeText(shareUrl); toast("Link copied"); }
     catch { $("#shareUrl").select(); document.execCommand("copy"); toast("Link copied"); }
   };
@@ -470,7 +505,7 @@ function renderEnd() {
   `;
   app.appendChild(overlay);
   $("#rematch")?.addEventListener("click", () => { wsSend({ type: "rematch" }); });
-  $("#leaveEnd").onclick = () => { state.game = null; state.view = "home"; render(); };
+  $("#leaveEnd").onclick = () => { state.game = null; state.view = "home"; syncUrl(); render(); };
 }
 
 async function renderProfile() {
