@@ -260,6 +260,15 @@ function renderCreate() {
             <h3>Sudden Death</h3>
             <p>First to guess wins. Pure speed.</p>
           </div>
+          <div class="mode ${state.pendingMode==='classic'?'selected':''}" data-mode="classic">
+            <div class="mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 21h8M12 17v4M5 4h14l-1 9a6 6 0 0 1-12 0L5 4z"/>
+              </svg>
+            </div>
+            <h3>Classic</h3>
+            <p>Race solo at the same time. Fewest guesses wins.</p>
+          </div>
         </div>
       </div>
       <button id="go">Create Game</button>
@@ -315,7 +324,7 @@ function renderLobby() {
           <div class="code-pill">${g.code}</div>
         </div>
         <div class="gameMeta">
-          <span class="badge">${g.mode==='turn'?'Turn-by-turn':'Sudden Death'}</span>
+          <span class="badge">${modeLabel(g.mode)}</span>
         </div>
       </div>
       <div class="share">
@@ -426,22 +435,20 @@ function patchOpponentsAndBanner() {
   const me = currentPlayer();
   if (!me) return false;
   const currentTurnId = g.turnPlayerId || null;
-  const myTurn = (g.mode === "sudden"
-    ? (!me.won && !me.resigned && g.status === "active")
-    : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
+  const myTurn = (g.mode === "turn"
+    ? (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active")
+    : (!me.won && !me.resigned && g.status === "active"));
   state.myTurn = myTurn;
 
   const banner = document.querySelector(".banner");
   if (banner) {
     banner.innerHTML = `
       <div>
-        <strong>${g.mode==='turn'?'Turn-by-turn':'Sudden Death'}</strong>
+        <strong>${modeLabel(g.mode)}</strong>
         <span class="muted"> · Code ${g.code}</span>
       </div>
       <div class="gameMeta">
-        ${g.mode==='turn'
-          ? `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>`
-          : `<span class="badge live">Race!</span>`}
+        ${modeBadge(g, me, myTurn, currentTurnId)}
         <span class="badge">${g.maxRows} rows</span>
       </div>
     `;
@@ -492,9 +499,9 @@ function renderGame(animateLast = false) {
     return;
   }
   const currentTurnId = g.turnPlayerId || null;
-  const myTurn = (g.mode === "sudden"
-    ? (!me.won && !me.resigned && g.status === "active")
-    : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
+  const myTurn = (g.mode === "turn"
+    ? (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active")
+    : (!me.won && !me.resigned && g.status === "active"));
   state.myTurn = myTurn;
   state.submitting = false;
 
@@ -506,13 +513,11 @@ function renderGame(animateLast = false) {
     </div>`)}
     <div class="banner">
       <div>
-        <strong>${g.mode==='turn'?'Turn-by-turn':'Sudden Death'}</strong>
+        <strong>${modeLabel(g.mode)}</strong>
         <span class="muted"> · Code ${g.code}</span>
       </div>
       <div class="gameMeta">
-        ${g.mode==='turn'
-          ? `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>`
-          : `<span class="badge live">Race!</span>`}
+        ${modeBadge(g, me, myTurn, currentTurnId)}
         <span class="badge">${g.maxRows} rows</span>
       </div>
     </div>
@@ -771,6 +776,26 @@ function renderEnd() {
   app.appendChild(overlay);
   $("#rematch")?.addEventListener("click", () => { wsSend({ type: "rematch" }); });
   $("#leaveEnd").onclick = () => { state.game = null; state.view = "home"; syncUrl(); render(); };
+}
+
+function modeLabel(mode) {
+  if (mode === "turn") return "Turn-by-turn";
+  if (mode === "sudden") return "Sudden Death";
+  if (mode === "classic") return "Classic";
+  return mode;
+}
+
+function modeBadge(g, me, myTurn, currentTurnId) {
+  if (g.mode === "turn") {
+    return `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>`;
+  }
+  if (g.mode === "sudden") return `<span class="badge live">Race!</span>`;
+  if (g.mode === "classic") {
+    if (me?.won) return `<span class="badge live">Solved · ${me.board.length} guesses</span>`;
+    if (me?.resigned) return `<span class="badge">Out</span>`;
+    return `<span class="badge live">${me?.board.length || 0}/${g.maxRows}</span>`;
+  }
+  return "";
 }
 
 function ordinal(n) {

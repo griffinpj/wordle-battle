@@ -23,6 +23,8 @@ function nextTurnIndex(g) {
   return -1;
 }
 
+const MODES = new Set(["turn", "sudden", "classic"]);
+
 function currentTurnPlayerId(g) {
   if (g.mode !== "turn" || g.status !== "active") return null;
   const cur = g.players[g.turnIndex];
@@ -90,6 +92,20 @@ function applyGuess(g, playerId, word, opts = {}) {
     return { ok: true, correct, extended, ended: false, winnerId: null };
   }
 
+  if (g.mode === "classic") {
+    // Free-for-all: no turn lock, but the game doesn't end on the first
+    // correct guess. Every player keeps guessing (or stops once they
+    // solve it) until nobody is eligible to play. Winner = fewest
+    // guesses to solve, tiebreak by earliest solve timestamp.
+    const extended = checkAutoExtend(g) != null;
+    if (eligiblePlayers(g).length === 0) {
+      g.status = "ended";
+      g.winnerId = determineWinner(g);
+      return { ok: true, correct, extended, ended: true, winnerId: g.winnerId };
+    }
+    return { ok: true, correct, extended, ended: false, winnerId: null };
+  }
+
   // Turn mode — keep playing until no eligible player remains.
   const extended = checkAutoExtend(g) != null;
   const next = nextTurnIndex(g);
@@ -152,6 +168,7 @@ function makeGameState({ mode = "turn", target = "crane", players, maxRows = 6 }
 }
 
 module.exports = {
+  MODES,
   isPlayerDone,
   eligiblePlayers,
   nextTurnIndex,

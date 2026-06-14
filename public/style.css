@@ -113,7 +113,7 @@ button.ghost { background: transparent; color: var(--muted); border: 1px solid v
 button.danger { background: var(--danger); }
 button:disabled { opacity: .5; cursor: not-allowed; }
 
-.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.modes { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .mode {
   border: 1px solid var(--line);
   background: var(--panel-2);
@@ -128,8 +128,9 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 
 /* Per-mode accent colors — keep visually distinct even when selected. */
-.mode[data-mode="turn"]   { --mode-color: #6aaa64; }   /* green  */
-.mode[data-mode="sudden"] { --mode-color: #e07a4a; }   /* warm orange */
+.mode[data-mode="turn"]    { --mode-color: #6aaa64; }  /* green */
+.mode[data-mode="sudden"]  { --mode-color: #e07a4a; }  /* warm orange */
+.mode[data-mode="classic"] { --mode-color: #7a8df7; }  /* indigo */
 
 .mode .mode-icon {
   width: 28px; height: 28px;

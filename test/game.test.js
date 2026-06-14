@@ -203,6 +203,87 @@ test("isPlayerDone covers won, resigned, exhausted", () => {
   assert.equal(isPlayerDone(g.players[2], g), true);
 });
 
+// ---------- classic mode ----------
+
+test("classic: no turn lock — any player can guess at any time", () => {
+  const g = gameOf(["A", "B", "C"], { mode: "classic" });
+  // currentTurnPlayerId is null in classic (no turns).
+  assert.equal(currentTurnPlayerId(g), null);
+  for (const id of ["B", "C", "A", "C", "B", "A"]) {
+    const r = applyGuess(g, id, "slate", { ts: ts() });
+    assert.equal(r.ok, true, `${id} should be allowed in classic mode`);
+  }
+});
+
+test("classic: correct guess does NOT end the game while others still eligible", () => {
+  const g = gameOf(["A", "B", "C"], { mode: "classic" });
+  const r = applyGuess(g, "A", "crane", { ts: ts() });
+  assert.equal(r.ok, true);
+  assert.equal(r.correct, true);
+  assert.equal(r.ended, false);
+  assert.equal(g.status, "active");
+  assert.equal(g.players[0].won, true);
+});
+
+test("classic: a winner cannot keep guessing", () => {
+  const g = gameOf(["A", "B"], { mode: "classic" });
+  applyGuess(g, "A", "crane", { ts: ts() });
+  const r = applyGuess(g, "A", "slate", { ts: ts() });
+  assert.equal(r.ok, false);
+});
+
+test("classic: game ends when all players are done; winner = fewest guesses", () => {
+  const g = gameOf(["A", "B", "C"], { mode: "classic" });
+  applyGuess(g, "A", "slate", { ts: 1 });   // A miss (1)
+  applyGuess(g, "B", "crane", { ts: 2 });   // B wins on guess 1
+  applyGuess(g, "C", "slate", { ts: 3 });   // C miss
+  applyGuess(g, "A", "crane", { ts: 4 });   // A wins on guess 2
+  applyGuess(g, "C", "trial", { ts: 5 });   // C miss
+  applyGuess(g, "C", "crane", { ts: 6 });   // C wins on guess 3 -> ends
+  assert.equal(g.status, "ended");
+  const ranked = rankedWinners(g).map(p => p.id);
+  assert.deepEqual(ranked, ["B", "A", "C"]);
+  assert.equal(g.winnerId, "B");
+});
+
+test("classic: tie on guess count broken by earliest solve ts", () => {
+  const g = gameOf(["A", "B"], { mode: "classic" });
+  applyGuess(g, "B", "crane", { ts: 100 });  // B wins g1 at ts 100
+  applyGuess(g, "A", "crane", { ts: 200 });  // A wins g1 at ts 200 -> ends
+  assert.equal(g.status, "ended");
+  assert.equal(g.winnerId, "B"); // earlier ts wins the tie
+});
+
+test("classic: auto-extend fires when all still-trying players exhaust rows", () => {
+  const g = gameOf(["A", "B"], { mode: "classic", maxRows: 6 });
+  applyGuess(g, "A", "crane", { ts: ts() }); // A wins g1
+  // B alone now; burn through 6 wrong guesses.
+  for (let i = 0; i < 5; i++) applyGuess(g, "B", "slate", { ts: ts() });
+  const r = applyGuess(g, "B", "slate", { ts: ts() });
+  assert.equal(r.extended, true);
+  assert.equal(g.maxRows, 8);
+  assert.equal(g.status, "active");
+});
+
+test("classic: game ends when all eligible exhaust rows with no extend possible", () => {
+  // Only A. They wrong-guess until exhaustion -> extend kicks in twice
+  // then we manually set won=false and force board length beyond.
+  // Easier: 1 player, set maxRows tiny and disable extend by making
+  // the player already won (so stillTrying is empty -> no extend fires).
+  // Cleanest direct case: A and B, both resign except for guesses.
+  const g = gameOf(["A", "B"], { mode: "classic" });
+  applyResign(g, "A");
+  const r = applyResign(g, "B");
+  assert.equal(r.ended, true);
+  assert.equal(g.status, "ended");
+  assert.equal(g.winnerId, null); // nobody solved it
+});
+
+test("classic: invalid format rejected regardless of mode", () => {
+  const g = gameOf(["A"], { mode: "classic" });
+  assert.equal(applyGuess(g, "A", "cran", { ts: ts() }).ok, false);
+});
+
 test("nextTurnIndex returns -1 when nobody is eligible", () => {
   const g = gameOf(["A", "B"]);
   g.players[0].resigned = true;

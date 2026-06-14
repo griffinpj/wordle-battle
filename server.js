@@ -231,6 +231,18 @@ async function handleGuess(game, player, word) {
     return;
   }
 
+  if (game.mode === "classic") {
+    // Classic: no turn lock, everyone keeps playing; game ends when no
+    // player is eligible. Winner = fewest guesses to solve.
+    checkAutoExtend(game);
+    if (eligiblePlayers(game).length === 0) {
+      sendState(game);
+      return endGame(game, determineWinner(game));
+    }
+    sendState(game);
+    return;
+  }
+
   // Turn mode: even on a correct guess, let the rest of the active
   // players finish their turn(s). Game only ends when no one is eligible
   // (all done — won, resigned, or exhausted maxRows).
@@ -291,7 +303,8 @@ wss.on("connection", (ws) => {
     const t = msg.type;
 
     if (t === "create") {
-      const mode = msg.mode === "sudden" ? "sudden" : "turn";
+      const requested = String(msg.mode || "");
+      const mode = (requested === "sudden" || requested === "classic") ? requested : "turn";
       const name = String(msg.name || "Host").slice(0, 24);
       const playerId = String(msg.playerId || "").slice(0, 64) || gameId16();
       const game = makeGame({ hostId: playerId, hostName: name, mode });
