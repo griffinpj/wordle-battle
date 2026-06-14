@@ -544,14 +544,24 @@ function renderGame(animateLast = false) {
   if (animateLast) animateExtendRows();
 }
 
+// Tracks how many rows of my board have already been animated so that a
+// re-render only flips the newest row — previously-revealed rows stay
+// still instead of re-running their flip animation every time.
+let myAnimatedUpTo = { gameId: null, len: 0 };
+
 function myBoardCard(me, g) {
   if (!me) return "";
+  if (myAnimatedUpTo.gameId !== g.id) {
+    myAnimatedUpTo = { gameId: g.id, len: 0 };
+  }
+  const animatedFrom = myAnimatedUpTo.len;
   const rows = [];
   for (let i = 0; i < g.maxRows; i++) {
     const entry = me.board[i];
     if (entry) {
+      const shouldFlip = i >= animatedFrom;
       rows.push(entry.word.split("").map((ch, j) =>
-        `<div class="tile ${entry.result[j]} flip" style="animation-delay:${j*80}ms">${ch}</div>`
+        `<div class="tile ${entry.result[j]}${shouldFlip ? ' flip' : ''}"${shouldFlip ? ` style="animation-delay:${j*80}ms"` : ''}>${ch}</div>`
       ).join(""));
     } else if (i === me.board.length && !me.won && !me.resigned && g.status === "active") {
       // Reserve current-input row — tiles get filled by paintCurrentRow().
@@ -562,6 +572,8 @@ function myBoardCard(me, g) {
       rows.push(Array.from({length:5}).map(() => `<div class="tile"></div>`).join(""));
     }
   }
+  // Anything already on the board after this render has now been animated.
+  myAnimatedUpTo = { gameId: g.id, len: me.board.length };
   const status = me.won ? "WON" : me.resigned ? "resigned" : null;
   return `
     <div class="boardCard myBoard me" data-pid="${me.id}">
@@ -574,11 +586,13 @@ function myBoardCard(me, g) {
 }
 
 // Opponent strip — colored rows only, no letters. Preserves privacy and
-// keeps the layout tight on mobile.
+// keeps the layout tight on mobile. Tiles render WITHOUT animation —
+// they're small status dots, not the player's own guesses, so flashing
+// every existing tile every time someone guesses would look like noise.
 function oppCard(p, g, currentTurnId) {
   const isTurn = g.mode === "turn" && currentTurnId === p.id;
   const filledRows = p.board.map(entry =>
-    `<div class="oppRow">${entry.result.map(r => `<span class="oppTile ${r} flip" style="animation-delay:0ms"></span>`).join("")}</div>`
+    `<div class="oppRow">${entry.result.map(r => `<span class="oppTile ${r}"></span>`).join("")}</div>`
   );
   const empty = Math.max(0, g.maxRows - p.board.length);
   const emptyRows = Array.from({length: empty}).map(() =>
