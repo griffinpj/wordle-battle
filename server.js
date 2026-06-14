@@ -107,6 +107,7 @@ function makeGame({ hostId, hostName, mode }) {
 }
 
 function publicStateFor(game, viewerId) {
+  const turnPlayerId = currentTurnPlayerId(game);
   return {
     id: game.id,
     code: game.code,
@@ -114,8 +115,16 @@ function publicStateFor(game, viewerId) {
     status: game.status,
     hostId: game.hostId,
     turnIndex: game.turnIndex,
+    turnPlayerId,
     maxRows: game.maxRows,
     winnerId: game.winnerId,
+    // Ranking surface — useful even mid-game (to show who has solved it
+    // already in turn mode). Only includes players who have won so far.
+    winners: rankedWinners(game).map(p => ({
+      id: p.id,
+      name: p.name,
+      guesses: p.board.length,
+    })),
     target: game.status === "ended" ? game.target : null,
     players: game.players.map(p => {
       const reveal = p.id === viewerId || game.status === "ended";
@@ -164,6 +173,55 @@ function activePlayers(game) {
   return game.players.filter(p => !p.resigned);
 }
 
+// A player is "done" when they can no longer guess this game:
+// won, resigned, or out of rows.
+function isPlayerDone(p, game) {
+  return p.resigned || p.won || p.board.length >= game.maxRows;
+}
+
+function eligiblePlayers(game) {
+  return game.players.filter(p => !isPlayerDone(p, game));
+}
+
+// In turn mode, turnIndex is an absolute index into game.players.
+// Find the next non-done player. Returns -1 if none.
+function nextTurnIndex(game) {
+  const n = game.players.length;
+  if (n === 0) return -1;
+  for (let step = 1; step <= n; step++) {
+    const i = (game.turnIndex + step) % n;
+    if (!isPlayerDone(game.players[i], game)) return i;
+  }
+  return -1;
+}
+
+function currentTurnPlayerId(game) {
+  if (game.mode !== "turn" || game.status !== "active") return null;
+  const cur = game.players[game.turnIndex];
+  if (cur && !isPlayerDone(cur, game)) return cur.id;
+  const next = nextTurnIndex(game);
+  return next >= 0 ? game.players[next].id : null;
+}
+
+// Returns winners ranked best-first. Best = fewest guesses to solve,
+// tiebreak by earliest solve timestamp. Works for any player count.
+function rankedWinners(game) {
+  return game.players
+    .filter(p => p.won)
+    .slice()
+    .sort((a, b) => {
+      if (a.board.length !== b.board.length) return a.board.length - b.board.length;
+      const at = a.board[a.board.length-1]?.ts || 0;
+      const bt = b.board[b.board.length-1]?.ts || 0;
+      return at - bt;
+    });
+}
+
+function determineWinner(game) {
+  const r = rankedWinners(game);
+  return r.length ? r[0].id : null;
+}
+
 function endGame(game, winnerId) {
   game.status = "ended";
   game.winnerId = winnerId;
@@ -172,10 +230,11 @@ function endGame(game, winnerId) {
 }
 
 function checkAutoExtend(game) {
-  // If no one has guessed correctly and all active players used all rows, extend by 2.
-  const active = activePlayers(game);
-  if (active.length === 0) return;
-  if (active.every(p => p.board.length >= game.maxRows && !p.won)) {
+  // Only extend if some player is still trying (not won, not resigned)
+  // but they have all exhausted maxRows.
+  const stillTrying = game.players.filter(p => !p.resigned && !p.won);
+  if (!stillTrying.length) return;
+  if (stillTrying.every(p => p.board.length >= game.maxRows)) {
     game.maxRows += 2;
     broadcast(game, { type: "extend", maxRows: game.maxRows });
   }
@@ -187,9 +246,7 @@ async function handleGuess(game, player, word) {
   word = String(word || "").toLowerCase().trim();
   if (!isFormatOk(word)) return send(player.ws, { type: "error", message: "Must be 5 letters" });
   if (game.mode === "turn") {
-    const active = activePlayers(game);
-    const current = active[game.turnIndex % active.length];
-    if (!current || current.id !== player.id) return send(player.ws, { type: "error", message: "Not your turn" });
+    if (currentTurnPlayerId(game) !== player.id) return send(player.ws, { type: "error", message: "Not your turn" });
   }
   if (player.validating) return; // prevent double-submit while async lookup is pending
   player.validating = true;
@@ -199,9 +256,7 @@ async function handleGuess(game, player, word) {
   // Re-check active state — game could have ended while awaiting the API.
   if (game.status !== "active" || player.won || player.resigned) return;
   if (game.mode === "turn") {
-    const active = activePlayers(game);
-    const current = active[game.turnIndex % active.length];
-    if (!current || current.id !== player.id) return send(player.ws, { type: "error", message: "Turn changed" });
+    if (currentTurnPlayerId(game) !== player.id) return send(player.ws, { type: "error", message: "Turn changed" });
   }
 
   const result = score(word, game.target);
@@ -210,39 +265,50 @@ async function handleGuess(game, player, word) {
   const correct = result.every(r => r === "correct");
   insertGuess.run(player.id, player.name, game.id, game.mode, word, game.target, correct ? 1 : 0, guessNum, Date.now());
 
-  if (correct) {
-    player.won = true;
+  if (correct) player.won = true;
+
+  if (game.mode === "sudden") {
+    // Sudden death: first correct ends it immediately.
+    if (correct) { sendState(game); return endGame(game, player.id); }
     sendState(game);
-    return endGame(game, player.id);
+    checkAutoExtend(game);
+    return;
   }
 
-  if (game.mode === "turn") {
-    // advance turn
-    const active = activePlayers(game);
-    if (active.length > 0) {
-      game.turnIndex = (game.turnIndex + 1) % active.length;
-    }
+  // Turn mode: even on a correct guess, let the rest of the active
+  // players finish their turn(s). Game only ends when no one is eligible
+  // (all done — won, resigned, or exhausted maxRows).
+  const next = nextTurnIndex(game);
+  if (next < 0) {
+    sendState(game);
+    return endGame(game, determineWinner(game));
   }
-
+  game.turnIndex = next;
   sendState(game);
   checkAutoExtend(game);
-
-  // Sudden death: nobody auto-ends until somebody wins or all resign.
-  // Turn mode same: continues until correct or all resign.
+  // After extending, the previously-exhausted players become eligible
+  // again; turnIndex still points at someone valid, so nothing else to do.
 }
 
 function handleResign(game, player) {
   if (game.status !== "active") return;
   player.resigned = true;
   broadcast(game, { type: "resigned", playerId: player.id });
-  const active = activePlayers(game);
-  if (active.length === 0) return endGame(game, null);
-  if (active.length === 1 && game.players.length > 1) {
-    // last standing wins by default
-    return endGame(game, active[0].id);
+
+  // If no one can still guess, finalize the game with the best winner so far
+  // (or null if nobody ever solved it).
+  const eligible = eligiblePlayers(game);
+  if (eligible.length === 0) {
+    return endGame(game, determineWinner(game));
   }
+
   if (game.mode === "turn") {
-    game.turnIndex = game.turnIndex % active.length;
+    const cur = game.players[game.turnIndex];
+    if (!cur || isPlayerDone(cur, game)) {
+      const next = nextTurnIndex(game);
+      if (next < 0) return endGame(game, determineWinner(game));
+      game.turnIndex = next;
+    }
   }
   sendState(game);
 }
@@ -287,11 +353,14 @@ wss.on("connection", (ws) => {
       const name = String(msg.name || "Player").slice(0, 24);
       let player = game.players.find(p => p.id === playerId);
       if (player) {
+        // Reconnect — bind ws + refresh name.
         player.ws = ws;
         player.name = name;
       } else {
-        if (game.status !== "lobby") return send(ws, { type: "error", message: "Game already started" });
-        if (game.players.length >= 6) return send(ws, { type: "error", message: "Game full" });
+        if (game.status === "ended") return send(ws, { type: "error", message: "Game already ended" });
+        if (game.players.length >= 8) return send(ws, { type: "error", message: "Game full" });
+        // Late join during an active game is allowed; they enter the turn
+        // rotation with an empty board.
         player = { id: playerId, name, ws, board: [], won: false, resigned: false };
         game.players.push(player);
       }

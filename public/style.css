@@ -350,6 +350,29 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 }
 .endCard .btnRow { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
 
+.winList {
+  list-style: none;
+  margin: 6px 0 14px;
+  padding: 0;
+  text-align: left;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.winList li {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+}
+.winList li.self { border-color: rgba(106,170,100,.5); }
+.winList .rank { font-weight: 800; color: var(--muted); text-align: center; }
+.winList li:first-child .rank { color: var(--accent); }
+.winList .who { font-weight: 600; }
+.winList .meta { color: var(--muted); font-size: 13px; }
+
 .modalOverlay {
   position: fixed; inset: 0;
   background: rgba(0,0,0,.55);

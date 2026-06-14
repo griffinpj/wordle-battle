@@ -20,6 +20,29 @@ function getPlayerId() {
 function getName() { return localStorage.getItem(STORAGE.name) || ""; }
 function setName(n) { localStorage.setItem(STORAGE.name, n); }
 
+const NAME_ADJECTIVES = [
+  "Creepy","Sneaky","Sleepy","Grumpy","Happy","Brave","Clever","Silly","Witty","Snappy",
+  "Fuzzy","Lucky","Wild","Quiet","Loud","Tiny","Mighty","Spicy","Salty","Sunny",
+  "Stormy","Lazy","Curious","Bold","Shy","Jolly","Gloomy","Crisp","Mellow","Zany",
+  "Quirky","Plucky","Cosmic","Feral","Mystic","Glowing","Velvet","Roaring","Dapper","Sassy",
+  "Drowsy","Jumpy","Nimble","Frosty","Cuddly","Twitchy","Toasty","Goofy","Smug","Noble",
+  "Lurking","Hungry","Restless","Cheery","Sturdy","Furious","Gentle","Dreamy","Rowdy","Polite",
+];
+const NAME_ANIMALS = [
+  "Fox","Wolf","Otter","Badger","Hawk","Owl","Lynx","Panda","Tiger","Bear",
+  "Falcon","Raven","Heron","Moose","Seal","Whale","Shark","Cobra","Toad","Newt",
+  "Hare","Mole","Skunk","Stoat","Crow","Quail","Finch","Goose","Magpie","Iguana",
+  "Lemur","Sloth","Walrus","Yak","Bison","Camel","Donkey","Wombat","Gecko","Beaver",
+  "Cheetah","Cougar","Jaguar","Mantis","Marmot","Pangolin","Penguin","Platypus","Puma","Ocelot",
+  "Octopus","Tapir","Vulture","Wallaby","Zebra","Dingo","Ferret","Hyena","Koala","Salmon",
+];
+
+function randomName() {
+  const a = NAME_ADJECTIVES[Math.floor(Math.random() * NAME_ADJECTIVES.length)];
+  const n = NAME_ANIMALS[Math.floor(Math.random() * NAME_ANIMALS.length)];
+  return `${a} ${n}`;
+}
+
 // State
 const state = {
   view: "home", // home | create | join | lobby | game | end | profile
@@ -189,6 +212,12 @@ function renderHome() {
   $("#profileBtn").onclick = () => { state.view = "profile"; render(); };
 
   if (state.joinCode) {
+    // Invite-link entry: auto-assign a fun name if they don't have one yet
+    // so they can drop straight into the lobby without typing.
+    if (!state.pendingName || !state.pendingName.trim()) {
+      state.pendingName = randomName();
+      setName(state.pendingName);
+    }
     state.view = "join";
     render();
   }
@@ -354,12 +383,24 @@ let curTileEls = [];
 function renderGame(animateLast = false) {
   const g = state.game;
   const me = currentPlayer();
-  const activeOrder = g.players.filter(p => !p.resigned);
-  const currentTurnId = g.mode === "turn" && activeOrder.length ? activeOrder[g.turnIndex % activeOrder.length]?.id : null;
-  const myTurn = !me ? false :
-    (g.mode === "sudden"
-      ? (!me.won && !me.resigned && g.status === "active")
-      : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
+  // Defensive: if our player ID isn't in the roster, attempt a rejoin and
+  // show a thin reconnecting state instead of a blank game.
+  if (!me) {
+    app.innerHTML = `
+      ${brand("")}
+      <div class="card stack center">
+        <p class="muted">Reconnecting to game ${escapeHTML(g.code)}…</p>
+        <button class="secondary" id="goHome">Back to Home</button>
+      </div>
+    `;
+    $("#goHome").onclick = () => { state.game = null; state.view = "home"; syncUrl(); render(); };
+    reconnect();
+    return;
+  }
+  const currentTurnId = g.turnPlayerId || null;
+  const myTurn = (g.mode === "sudden"
+    ? (!me.won && !me.resigned && g.status === "active")
+    : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
   state.myTurn = myTurn;
   state.submitting = false;
 
@@ -582,17 +623,37 @@ function shakeCurrentRow() {
 function renderEnd() {
   const g = state.game;
   const me = currentPlayer();
-  const won = g.winnerId && g.winnerId === me?.id;
-  const winner = g.players.find(p => p.id === g.winnerId);
+  const winners = g.winners || (g.winnerId ? [{ id: g.winnerId, name: playerName(g.winnerId), guesses: g.players.find(p => p.id === g.winnerId)?.board.length || 0 }] : []);
+  const top = winners[0];
+  const iWon = !!(me && winners.some(w => w.id === me.id));
+  const myRank = me ? winners.findIndex(w => w.id === me.id) : -1;
+
   // Background remains current view (game). Overlay on top.
   renderGame();
   const overlay = document.createElement("div");
   overlay.className = "endOverlay";
+
+  const heading = winners.length === 0
+    ? "Nobody solved it"
+    : (iWon
+        ? (myRank === 0 ? "You won! 🎉" : `You solved it — ${ordinal(myRank+1)} place`)
+        : `${escapeHTML(top.name)} wins`);
+
+  const list = winners.length
+    ? `<ol class="winList">${winners.map((w, i) => `
+        <li class="${w.id===me?.id?'self':''}">
+          <span class="rank">${i+1}</span>
+          <span class="who">${escapeHTML(w.name)}${w.id===me?.id?' (you)':''}</span>
+          <span class="meta">${w.guesses} guess${w.guesses===1?'':'es'}</span>
+        </li>`).join("")}</ol>`
+    : `<p class="muted center">No winners this round.</p>`;
+
   overlay.innerHTML = `
     <div class="endCard">
-      <h2>${winner ? (won ? "You won! 🎉" : `${escapeHTML(winner.name)} wins`) : "Draw"}</h2>
+      <h2>${heading}</h2>
       <div class="muted">The word was</div>
       <div class="target">${g.target || "—"}</div>
+      ${list}
       <div class="btnRow">
         ${me?.id === g.hostId ? `<button id="rematch">Rematch</button>` : `<div class="muted">Waiting for host…</div>`}
         <button class="ghost" id="leaveEnd">Leave</button>
@@ -602,6 +663,11 @@ function renderEnd() {
   app.appendChild(overlay);
   $("#rematch")?.addEventListener("click", () => { wsSend({ type: "rematch" }); });
   $("#leaveEnd").onclick = () => { state.game = null; state.view = "home"; syncUrl(); render(); };
+}
+
+function ordinal(n) {
+  const s = ["th","st","nd","rd"], v = n % 100;
+  return n + (s[(v-20)%10] || s[v] || s[0]);
 }
 
 async function renderProfile() {
