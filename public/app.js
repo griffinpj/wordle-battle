@@ -124,7 +124,8 @@ function onMessage(msg) {
       if (msg.state.status === "lobby") state.view = "lobby";
       else if (msg.state.status === "active" && state.view !== "end") state.view = "game";
       syncUrl();
-      render();
+      if (state.view === "game") renderGameSmart(prev);
+      else render();
       break;
     case "start":
       state.game = msg.state;
@@ -394,6 +395,84 @@ function renderLobby() {
 // Cached references to the current-input row's tiles, so per-keystroke
 // updates can mutate the DOM directly without a full re-render.
 let curTileEls = [];
+
+// Decide whether anything that affects MY board / the whole layout changed
+// between two state snapshots. Anything in the "opponents only changed"
+// camp gets a targeted patch instead of a full re-render — eliminates the
+// flicker you'd otherwise get every time an opponent guesses.
+function structuralChange(prev, next) {
+  if (!prev || !next) return true;
+  if (prev.id !== next.id) return true;
+  if (prev.status !== next.status) return true;
+  if (prev.maxRows !== next.maxRows) return true;
+  if (prev.players.length !== next.players.length) return true;
+  const pid = getPlayerId();
+  const pme = prev.players.find(p => p.id === pid);
+  const nme = next.players.find(p => p.id === pid);
+  if (!!pme !== !!nme) return true;
+  if (pme && nme) {
+    if (pme.board.length !== nme.board.length) return true;
+    if (pme.won !== nme.won) return true;
+    if (pme.resigned !== nme.resigned) return true;
+  }
+  return false;
+}
+
+// Targeted patch: refresh only the opponent strip + banner + keyboard
+// lock state. Never touches my own board so the current-input row and
+// any in-flight animation stay intact.
+function patchOpponentsAndBanner() {
+  const g = state.game;
+  const me = currentPlayer();
+  if (!me) return false;
+  const currentTurnId = g.turnPlayerId || null;
+  const myTurn = (g.mode === "sudden"
+    ? (!me.won && !me.resigned && g.status === "active")
+    : (currentTurnId === me.id && !me.won && !me.resigned && g.status === "active"));
+  state.myTurn = myTurn;
+
+  const banner = document.querySelector(".banner");
+  if (banner) {
+    banner.innerHTML = `
+      <div>
+        <strong>${g.mode==='turn'?'Turn-by-turn':'Sudden Death'}</strong>
+        <span class="muted"> · Code ${g.code}</span>
+      </div>
+      <div class="gameMeta">
+        ${g.mode==='turn'
+          ? `<span class="badge ${myTurn?'live':''}">${myTurn?'Your turn':`${escapeHTML(playerName(currentTurnId))}'s turn`}</span>`
+          : `<span class="badge live">Race!</span>`}
+        <span class="badge">${g.maxRows} rows</span>
+      </div>
+    `;
+  }
+
+  const others = g.players.filter(p => p.id !== me.id);
+  let oppBar = document.querySelector(".oppBar");
+  if (others.length && oppBar) {
+    oppBar.innerHTML = others.map(p => oppCard(p, g, currentTurnId)).join("");
+  } else if (others.length && !oppBar) {
+    // Bar didn't exist before (e.g. solo lobby) — full render to add it.
+    return false;
+  }
+
+  const kb = document.querySelector("#kb");
+  if (kb) {
+    kb.classList.toggle("locked", !myTurn);
+    kb.setAttribute("aria-disabled", String(!myTurn));
+  }
+  return true;
+}
+
+// Choose between targeted patch and full re-render based on what changed.
+function renderGameSmart(prevGame) {
+  if (state.view !== "game") return render();
+  // No DOM yet → full render.
+  if (!document.querySelector(".myBoard")) return render();
+  if (structuralChange(prevGame, state.game)) return render();
+  if (!patchOpponentsAndBanner()) return render();
+  // Patched successfully — no flicker, my board untouched.
+}
 
 function renderGame(animateLast = false) {
   const g = state.game;
