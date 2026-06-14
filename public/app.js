@@ -391,9 +391,14 @@ function renderGame(animateLast = false) {
     </div>
     ${keyboardEl(me, g)}
   `;
-  $("#resign").onclick = () => {
-    if (!confirm("Resign this round?")) return;
-    wsSend({ type: "resign" });
+  $("#resign").onclick = async () => {
+    const ok = await confirmModal({
+      title: "Resign this round?",
+      body: "Your opponent wins and the word will be revealed.",
+      confirmLabel: "Resign",
+      confirmClass: "danger",
+    });
+    if (ok) wsSend({ type: "resign" });
   };
   curTileEls = Array.from(document.querySelectorAll('.myBoard .tile[data-cur]'));
   paintCurrentRow(); // sync DOM to state.current
@@ -663,6 +668,37 @@ function escapeHTML(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 function escapeAttr(s) { return escapeHTML(s); }
+
+function confirmModal({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", confirmClass = "" } = {}) {
+  return new Promise(resolve => {
+    const overlay = document.createElement("div");
+    overlay.className = "modalOverlay";
+    overlay.innerHTML = `
+      <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <h2 id="modalTitle">${escapeHTML(title || "")}</h2>
+        ${body ? `<p class="modalBody">${escapeHTML(body)}</p>` : ""}
+        <div class="modalBtns">
+          <button class="ghost" data-act="cancel">${escapeHTML(cancelLabel)}</button>
+          <button class="${confirmClass}" data-act="ok">${escapeHTML(confirmLabel)}</button>
+        </div>
+      </div>
+    `;
+    const close = (val) => {
+      overlay.classList.add("closing");
+      setTimeout(() => { overlay.remove(); document.removeEventListener("keydown", onKey); resolve(val); }, 120);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); close(false); }
+      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+    };
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(false); });
+    overlay.querySelector('[data-act="cancel"]').onclick = () => close(false);
+    overlay.querySelector('[data-act="ok"]').onclick = () => close(true);
+    document.addEventListener("keydown", onKey);
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-act="ok"]').focus();
+  });
+}
 
 // Boot
 render();
