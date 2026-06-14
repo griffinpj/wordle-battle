@@ -73,6 +73,41 @@ const recentGamesForPlayer = db.prepare(`
 `);
 
 const app = express();
+
+// Cache-bust assets every container start so a redeploy with a fresh image
+// never serves stale app.js / style.css from a client cache.
+const APP_VERSION = process.env.APP_VERSION || String(Date.now());
+
+app.use((req, res, next) => {
+  // HTML is always revalidated; JS/CSS get a long max-age but live behind
+  // ?v=APP_VERSION so a new deploy invalidates them automatically.
+  if (req.path === "/" || req.path.endsWith(".html")) {
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  } else if (/\.(js|css)$/.test(req.path)) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  }
+  next();
+});
+
+// Serve index.html through a handler that injects the current APP_VERSION
+// into asset URLs so cache busting "just works" on every deploy.
+app.get(["/", "/index.html"], (_req, res) => {
+  const fs = require("fs");
+  let html;
+  try {
+    html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8");
+  } catch (e) {
+    return res.status(500).send("Failed to read index.html");
+  }
+  html = html
+    .replace(/href="\/style\.css"/g, `href="/style.css?v=${APP_VERSION}"`)
+    .replace(/src="\/app\.js"/g, `src="/app.js?v=${APP_VERSION}"`);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
+});
+
 app.use(express.static(path.join(__dirname, "public")));
 app.use(express.json());
 
