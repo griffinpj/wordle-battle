@@ -360,22 +360,26 @@ function renderLobby() {
     </div>
   `;
   $("#leave").onclick = () => { wsSend({ type: "leave_lobby" }); state.game = null; state.view = "home"; syncUrl(); render(); };
-  $("#copy").onclick = async () => {
-    try { await navigator.clipboard.writeText(shareUrl); toast("Link copied"); }
-    catch { $("#shareUrl").select(); document.execCommand("copy"); toast("Link copied"); }
-  };
+  $("#copy").onclick = () => copyToClipboard(shareUrl);
   $("#share").onclick = async () => {
     const shareData = {
       title: "Wordle Battle",
       text: `Join my Wordle Battle — code ${g.code}`,
       url: shareUrl,
     };
-    if (navigator.share) {
-      try { await navigator.share(shareData); return; }
-      catch (e) { if (e?.name === "AbortError") return; /* fall through to copy */ }
+    const canNativeShare = typeof navigator !== "undefined"
+      && typeof navigator.share === "function"
+      && (typeof navigator.canShare !== "function" || navigator.canShare(shareData));
+    if (canNativeShare) {
+      try {
+        await navigator.share(shareData);
+        return; // share sheet completed
+      } catch (e) {
+        if (e?.name === "AbortError") return; // user cancelled — leave silently
+        // any other failure: fall through to clipboard copy
+      }
     }
-    try { await navigator.clipboard.writeText(shareUrl); toast("Link copied"); }
-    catch { $("#shareUrl").select(); document.execCommand("copy"); toast("Link copied"); }
+    await copyToClipboard(shareUrl);
   };
   $("#setName").onclick = () => {
     const v = $("#rename").value.trim().slice(0, 24);
@@ -745,6 +749,37 @@ function escapeHTML(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
 }
 function escapeAttr(s) { return escapeHTML(s); }
+
+async function copyToClipboard(text) {
+  // Try the modern async clipboard API first. Requires a secure context
+  // (HTTPS / localhost) and a user gesture — which the share/copy click
+  // already provides.
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      toast("Link copied");
+      return true;
+    }
+  } catch {
+    // fall through to execCommand fallback
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "0";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    ta.remove();
+    if (ok) { toast("Link copied"); return true; }
+  } catch {}
+  toast("Couldn't copy — long-press the link to copy");
+  return false;
+}
 
 function confirmModal({ title, body, confirmLabel = "Confirm", cancelLabel = "Cancel", confirmClass = "" } = {}) {
   return new Promise(resolve => {
