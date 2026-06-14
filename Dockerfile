@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY package.json ./
 RUN npm install --omit=dev --build-from-source=better-sqlite3
 
-COPY server.js words.js ./
+COPY server.js words.js game.js ./
 COPY public ./public
 
 ENV NODE_ENV=production
