@@ -5,6 +5,15 @@ const { WebSocketServer } = require("ws");
 const Database = require("better-sqlite3");
 const { customAlphabet } = require("nanoid");
 const { randomAnswer, validateGuess, isFormatOk, score } = require("./words");
+const {
+  isPlayerDone,
+  eligiblePlayers,
+  nextTurnIndex,
+  currentTurnPlayerId,
+  rankedWinners,
+  determineWinner,
+  checkAutoExtend: checkAutoExtendPure,
+} = require("./game");
 
 const PORT = process.env.PORT || 3000;
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
@@ -173,55 +182,6 @@ function activePlayers(game) {
   return game.players.filter(p => !p.resigned);
 }
 
-// A player is "done" when they can no longer guess this game:
-// won, resigned, or out of rows.
-function isPlayerDone(p, game) {
-  return p.resigned || p.won || p.board.length >= game.maxRows;
-}
-
-function eligiblePlayers(game) {
-  return game.players.filter(p => !isPlayerDone(p, game));
-}
-
-// In turn mode, turnIndex is an absolute index into game.players.
-// Find the next non-done player. Returns -1 if none.
-function nextTurnIndex(game) {
-  const n = game.players.length;
-  if (n === 0) return -1;
-  for (let step = 1; step <= n; step++) {
-    const i = (game.turnIndex + step) % n;
-    if (!isPlayerDone(game.players[i], game)) return i;
-  }
-  return -1;
-}
-
-function currentTurnPlayerId(game) {
-  if (game.mode !== "turn" || game.status !== "active") return null;
-  const cur = game.players[game.turnIndex];
-  if (cur && !isPlayerDone(cur, game)) return cur.id;
-  const next = nextTurnIndex(game);
-  return next >= 0 ? game.players[next].id : null;
-}
-
-// Returns winners ranked best-first. Best = fewest guesses to solve,
-// tiebreak by earliest solve timestamp. Works for any player count.
-function rankedWinners(game) {
-  return game.players
-    .filter(p => p.won)
-    .slice()
-    .sort((a, b) => {
-      if (a.board.length !== b.board.length) return a.board.length - b.board.length;
-      const at = a.board[a.board.length-1]?.ts || 0;
-      const bt = b.board[b.board.length-1]?.ts || 0;
-      return at - bt;
-    });
-}
-
-function determineWinner(game) {
-  const r = rankedWinners(game);
-  return r.length ? r[0].id : null;
-}
-
 function endGame(game, winnerId) {
   game.status = "ended";
   game.winnerId = winnerId;
@@ -230,13 +190,9 @@ function endGame(game, winnerId) {
 }
 
 function checkAutoExtend(game) {
-  // Only extend if some player is still trying (not won, not resigned)
-  // but they have all exhausted maxRows.
-  const stillTrying = game.players.filter(p => !p.resigned && !p.won);
-  if (!stillTrying.length) return;
-  if (stillTrying.every(p => p.board.length >= game.maxRows)) {
-    game.maxRows += 2;
-    broadcast(game, { type: "extend", maxRows: game.maxRows });
+  const newMax = checkAutoExtendPure(game);
+  if (newMax != null) {
+    broadcast(game, { type: "extend", maxRows: newMax });
   }
 }
 
